@@ -351,9 +351,16 @@ class StaticPropFlags(Flag):
     NO_PER_VERTEX_LIGHTING = 0x40
     NO_SELF_SHADOWING = 0x80
 
+    #NO_PER_TEXEL_LIGHTING = 0x100  # Secondary 0x100 for 2013mp
+
     # These are set in the secondary flags section.
     NO_FLASHLIGHT = 0x100  # Disable projected texture lighting.
     BOUNCED_LIGHTING = 0x0400  # Bounce lighting off the prop.
+
+    @property
+    def value_2013(self) -> int:
+        """Return the data for the original flag int"""
+        return self.value
 
     @property
     def value_prim(self) -> int:
@@ -537,7 +544,7 @@ class BSP:
     ]] = {}
     version: Union[VERSIONS, int]
 
-    def __init__(self, filename: Union[str, os.PathLike], version: VERSIONS=None):
+    def __init__(self, filename: Union[str, os.PathLike], version: VERSIONS = None, is_2013mp: bool = False):
         self.filename = filename
         self.map_revision = -1  # The map's revision count
         self.lumps: dict[BSP_LUMPS, Lump] = {}
@@ -548,6 +555,7 @@ class BSP:
         # Tracks if the ent lump is using the new x1D output separators,
         # or the old comma separators. If no outputs are present there's no
         # way to determine this.
+        self.is_2013mp = is_2013mp  # Is the game a 2013mp game?
         self.out_comma_sep: Optional[bool] = None
         # This internally stores the texdata values texinfo refers to. Users
         # don't interact directly, instead they use the create_texinfo / texinfo.set()
@@ -649,6 +657,10 @@ class BSP:
                     glump_version,
                     file.read(file_len),
                 )
+
+            if self.is_2013mp:
+                self.game_lumps[LMP_ID_STATIC_PROPS].version = -13  # Signify a 2013 static prop lump
+
             # This is not valid any longer.
             game_lump.data = b''
 
@@ -712,11 +724,15 @@ class BSP:
                     lump_start = file.tell()
                     file.write(struct.pack('<i', len(game_lumps)))
                     for game_lump in game_lumps:
+                        version = game_lump.version
+                        if self.is_2013mp:
+                            version = 10  # override -13 hack back to normal
+
                         file.write(struct.pack(
                             '<4s HH',
                             game_lump.id[::-1],
                             game_lump.flags,
-                            game_lump.version,
+                            version,
                         ))
                         defer.defer(game_lump.id, '<i', write=True)
                         file.write(struct.pack('<i', len(game_lump.data)))
@@ -1809,11 +1825,12 @@ class BSP:
 
     def _lmp_read_props(self, version: int, data: bytes) -> Iterator['StaticProp']:
         # The version of the static prop format - different features.
-        if version > 11:
-            raise ValueError('Unknown version ({})!'.format(version))
-        if version < 4:
-            # Predates HL2...
-            raise ValueError('Static prop version {} is too old!')
+        if version != -13:
+            if version > 11:
+                raise ValueError('Unknown version ({})!'.format(version))
+            if version < 4:
+                # Predates HL2...
+                raise ValueError('Static prop version {} is too old!')
 
         static_lump = BytesIO(data)
 
@@ -1840,27 +1857,50 @@ class BSP:
                 first_leaf,
                 leaf_count,
                 solidity,
-                flags,
-                skin,
-                min_fade,
-                max_fade,
-            ) = struct_read('<HHBBiff', static_lump)
+            ) = struct_read('<HHB', static_lump)
+
+            flags, skin, min_fade, max_fade = None, None, None, None
+            if version == -13:
+                (
+                    _, # flags still takes up space despite doing nothing
+                    skin,
+                    min_fade,
+                    max_fade,
+                ) = struct_read('<Biff', static_lump)
+            else:
+                (
+                    flags,
+                    skin,
+                    min_fade,
+                    max_fade,
+                ) = struct_read('<Biff', static_lump)
 
             model_name = model_dict[model_ind]
 
             visleafs = set(visleaf_list[first_leaf:first_leaf + leaf_count])
             lighting_origin = Vec(struct_read('<fff', static_lump))
 
-            if version >= 5:
+            if version >= 5 or version == -13:
                 fade_scale = struct_read('<f', static_lump)[0]
             else:
                 fade_scale = 1  # default
 
-            if version in (6, 7):
+            if version in (6, 7, -13):
                 min_dx_level, max_dx_level = struct_read('<HH', static_lump)
             else:
                 # Replaced by GPU & CPU in later versions.
                 min_dx_level = max_dx_level = 0  # None
+
+            lightmapresx, lightmapresy = None, None
+            if version == -13:
+                [flags] = struct_read('<I', static_lump)  # Big endian for some reason, at least I think
+
+                (
+                    lightmapresx,
+                    lightmapresy,
+                ) = struct_read('<HH', static_lump)
+            else:
+                lightmapresx = lightmapresy = 0
 
             if version >= 8:
                 (
@@ -1916,6 +1956,8 @@ class BSP:
                 max_fade,
                 lighting_origin,
                 fade_scale,
+                lightmapresx,
+                lightmapresy,
                 min_dx_level,
                 max_dx_level,
                 min_cpu_level,
@@ -1965,11 +2007,25 @@ class BSP:
             ))
 
             prop_lump.write(struct.pack(
-                '<HHBBifffff',
+                '<HHB',
                 leaf_off,
                 len(prop.visleafs),
                 prop.solidity,
-                prop.flags.value_prim,
+            ))
+
+            if version != -13:
+                prop_lump.write(struct.pack(
+                    '<B',
+                    prop.flags.value_prim
+                ))
+            else:
+                prop_lump.write(struct.pack(
+                    '<B',
+                    0
+                ))
+
+            prop_lump.write(struct.pack(
+                '<ifffff',
                 prop.skin,
                 prop.min_fade,
                 prop.max_fade,
@@ -1977,14 +2033,26 @@ class BSP:
                 prop.lighting.y,
                 prop.lighting.z,
             ))
-            if version >= 5:
+            if version >= 5 or version == -13:
                 prop_lump.write(struct.pack('<f', prop.fade_scale))
 
-            if version in (6, 7):
+            if version in (6, 7, -13):
                 prop_lump.write(struct.pack(
                     '<HH',
                     prop.min_dx_level,
                     prop.max_dx_level,
+                ))
+
+            if version == -13:
+                prop_lump.write(struct.pack(
+                    '<I',
+                    prop.flags.value_2013,
+                ))
+
+                prop_lump.write(struct.pack(
+                    '<HH',
+                    prop.lightmapresx,
+                    prop.lightmapresy,
                 ))
 
             if version >= 8:
@@ -2414,6 +2482,8 @@ class StaticProp:
     v9+ allows disabling on XBox 360.
     v10+ adds 4 unknown bytes (float?), and an expanded flags section.
     v11+ adds uniform scaling and removes XBox disabling.
+
+    v2013mp: post v6, adds lightmaps
     """
     model: str
     origin: Vec
@@ -2428,6 +2498,8 @@ class StaticProp:
     # If not provided, uses origin.
     lighting: Vec = attr.ib(default=attr.Factory(lambda prp: prp.origin.copy(), takes_self=True))
     fade_scale: float = -1.0
+    lightmapresx: int = 0
+    lightmapresy: int = 0
     min_dx_level: int = 0
     max_dx_level: int = 0
     min_cpu_level: int = 0

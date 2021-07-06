@@ -30,7 +30,7 @@ a = Analysis(
     datas=DATAS,
     hiddenimports=[
         # Ensure these modules are available for plugins.
-        'abc', 'array', 'base64', 'binascii', 'binhex',
+        'abc', 'array', 'attr', 'base64', 'binascii', 'binhex',
         'bisect', 'colorsys', 'collections', 'csv', 'datetime',
         'decimal', 'difflib', 'enum', 'fractions', 'functools',
         'io', 'itertools', 'json', 'math', 'random', 're',

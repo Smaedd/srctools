@@ -598,7 +598,7 @@ class PackList:
 
     def pack_from_bsp(self, bsp: BSP) -> None:
         """Pack files found in BSP data (excluding entities)."""
-        for prop in bsp.static_props():
+        for prop in bsp.props:
             # Static props obviously only use one skin.
             self.pack_file(prop.model, FileType.MODEL, skinset={prop.skin})
 

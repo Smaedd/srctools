@@ -65,6 +65,12 @@ def main(argv: List[str]) -> None:
     )
 
     parser.add_argument(
+        "--is2013mp",
+        action="store_true",
+        help="Allows the program to read the 2013MP static prop lump",
+    )
+
+    parser.add_argument(
         "map",
         help="The path to the BSP file.",
     )
@@ -116,7 +122,7 @@ def main(argv: List[str]) -> None:
     LOGGER.info('Done! ({} sounds)', len(packlist.soundscripts))
 
     LOGGER.info('Reading BSP...')
-    bsp_file = BSP(path)
+    bsp_file = BSP(path, None, args.is2013mp)
 
     LOGGER.info('Reading entities...')
     LOGGER.info('Done!')
