@@ -40,6 +40,20 @@ from srctools.compiler.propcombine import (
 
 LOGGER = get_logger(__name__)
 
+SCALE_QC_TEMPLATE = '''\
+$staticprop
+$modelname "{path}"
+$surfaceprop "{surf}"
+    
+$body body "reference.smd"
+
+$contents {contents}
+
+$bbox {bbox}
+
+$sequence idle anim act_idle 1
+'''
+
 # Cache of the SMD models we have already parsed, so we don't need
 # to parse them again. The second is the collision model.
 _mesh_cache = {}  # type: Dict[Tuple[QC, int], Mesh]
@@ -171,8 +185,15 @@ def compile_func(
         with (temp_folder / 'physics.smd').open('wb') as fb:
             coll_mesh.export(fb)
 
+    bbox_min, bbox_max = Vec.bbox(
+        vert.pos
+        for tri in
+        ref_mesh.triangles
+        for vert in tri
+    )
+
     with (temp_folder / 'model.qc').open('w') as f:
-        f.write(QC_TEMPLATE.format(
+        f.write(SCALE_QC_TEMPLATE.format(
             path=mdl_name,
             surf=surfprop,
             # For $contents, we need to decompose out each bit.
@@ -189,6 +210,11 @@ def compile_func(
                 if mask & phy_content_type
                 # 0 needs to produce this value.
             ]) or '"notsolid"',
+
+            bbox=' '.join([
+                str(bbox_min * prop_pos.scale),
+                str(bbox_max * prop_pos.scale),
+            ])
         ))
 
         for mat in sorted(cdmats):
@@ -212,12 +238,6 @@ def build_collision(qc: QC, prop: ScalePropPos, ref_mesh: Mesh) -> Optional[Mesh
             with open(qc.phy_smd, 'rb') as fb:
                 coll = Mesh.parse_smd(fb)
 
-            rot = Matrix.from_yaw(90)
-            for tri in coll.triangles:
-                for vert in tri:
-                    vert.pos @= rot
-                    vert.norm @= rot
-
             _coll_cache[qc.phy_smd] = coll
             return coll
     # Else, it's one of the three bounding box types.
@@ -228,6 +248,10 @@ def build_collision(qc: QC, prop: ScalePropPos, ref_mesh: Mesh) -> Optional[Mesh
         ref_mesh.triangles
         for vert in tri
     )
+
+    bbox_min *= prop.scale
+    bbox_max *= prop.scale
+
     return Mesh.build_bbox('static_prop', 'phy', bbox_min, bbox_max)
 
 
@@ -304,6 +328,8 @@ def scale_props(
             continue
 
         scalable_props.append(prop)
+
+    LOGGER.info('{} scalable props found.', len(scalable_props))
 
     if not qc_folders and decomp_cache_loc is None:
         # If gameinfo is blah/game/hl2/gameinfo.txt,
@@ -463,6 +489,12 @@ def scale_props(
             final_props.append(scaled_prop)
             scale_count += 1
 
+    LOGGER.info(
+        'Scaled {} props - {} failed',
+        scale_count,
+        len(scalable_props) - scale_count,
+    )
+
     LOGGER.debug('Models with unknown QCs: \n{}', '\n'.join(sorted(missing_qcs)))
     # If present, delete old cache file. We'll have cleaned up the models.
     try:
@@ -471,6 +503,7 @@ def scale_props(
         pass
 
     # Clean up the map from scalable props
+    LOGGER.info('Removing {} prop_static_scalables....', len(possible_scalable_props))
     for prop in possible_scalable_props:
         prop.remove()
 

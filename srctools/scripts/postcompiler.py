@@ -49,6 +49,13 @@ def main(argv: List[str]) -> None:
         action="store_false",
         help="Prevent packing of files found in the map."
     )
+
+    parser.add_argument(
+        "--propscale",
+        action="store_true",
+        help="Disable prop scaling."
+    )
+
     parser.add_argument(
         "--propcombine",
         action="store_true",
@@ -180,22 +187,30 @@ def main(argv: List[str]) -> None:
         else:
             crowbar_loc = None
 
-        propscale.scale_props(
-            bsp_file,
-            bsp_file.ents,
-            packlist,
-            game_info,
-            studiomdl_loc,
-            qc_folders=[
-                game_info.root / folder
-                for folder in
-                conf.get(Property, 'prop_ops_qc_folder').as_array(conv=Path)
-            ],
-            decomp_cache_loc=decomp_cache_loc,
-            crowbar_loc=crowbar_loc,
-            debug_tint=args.showgroups,
-            debug_dump=args.dumpgroups,
-        )
+        if args.propscale:
+            LOGGER.info('Scaling props...')
+            propscale.scale_props(
+                bsp_file,
+                bsp_file.ents,
+                packlist,
+                game_info,
+                studiomdl_loc,
+                qc_folders=[
+                    game_info.root / folder
+                    for folder in
+                    conf.get(Property, 'prop_ops_qc_folder').as_array(conv=Path)
+                ],
+                decomp_cache_loc=decomp_cache_loc,
+                crowbar_loc=crowbar_loc,
+                debug_tint=args.showgroups,
+                debug_dump=args.dumpgroups,
+            )
+            LOGGER.info('Done!')
+        else:
+            ents = bsp_file.ents.by_class['prop_static_scalable']
+            LOGGER.info('Removing {} prop_static_scalables...', len(ents))
+            for ent in ents:
+                ent.remove()
 
         if args.propcombine:
             LOGGER.info('Combining props...')
@@ -219,14 +234,15 @@ def main(argv: List[str]) -> None:
             )
             LOGGER.info('Done!')
         else:  # Strip these if they're present.
-            for ent in bsp_file.ents.by_class['comp_propcombine_set']:
+            set_ents = bsp_file.ents.by_class['comp_propcombine_set']
+            LOGGER.info('Removing {} comp_propcombine_sets...', len(set_ents))
+            for ent in set_ents:
                 ent.remove()
-            for ent in bsp_file.ents.by_class['comp_propcombine_volume']:
+            volume_ents = bsp_file.ents.by_class['comp_propcombine_volume']
+            LOGGER.info('Removing {} comp_propcombine_volumes...', len(volume_ents))
+            for ent in volume_ents:
                 bsp_file.bmodels.pop(ent, None)  # Ignore if not present.
                 ent.remove()
-    else:
-        for ent in bsp_file.ents.by_class['prop_static_scalable']:
-            ent.remove()
 
     if conf.get(bool, 'auto_pack') and args.allow_pack:
         LOGGER.info('Analysing packable resources...')
@@ -279,6 +295,7 @@ def main(argv: List[str]) -> None:
     bsp_file.save()
 
     LOGGER.info("HammerAddons postcompiler complete!")
+
 
 if __name__ == '__main__':
     main(sys.argv[1:])
