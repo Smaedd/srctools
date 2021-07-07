@@ -96,7 +96,7 @@ def scale_prop(
     return StaticProp(
         model=mdl_name,
         origin=prop.origin,
-        angles=Angle(0, 0, 0),
+        angles=prop.angles,
         scaling=1.0,
         visleafs=visleafs,
         solidity=(CollType.VPHYS if has_coll else CollType.NONE).value,
@@ -145,14 +145,6 @@ def compile_func(
             ))
             for tri in child_ref.triangles:
                 tri.mat = swap_skins.get(tri.mat, tri.mat)
-
-        # For some reason all the SMDs are rotated badly, but only
-        # if we append them.
-        rot = Matrix.from_yaw(90)
-        for tri in child_ref.triangles:
-            for vert in tri:
-                vert.pos @= rot
-                vert.norm @= rot
 
         _mesh_cache[qc, prop_pos.skin] = child_ref
 
