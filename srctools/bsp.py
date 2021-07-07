@@ -1845,7 +1845,7 @@ class BSP:
 
         [prop_count] = struct_read('<i', static_lump)
 
-        prop_length = (len(data) - static_lump.tell()) / prop_count
+        # prop_length = (len(data) - static_lump.tell()) / prop_count  # No need, causes /0 error
 
         for i in range(prop_count):
             origin = Vec(struct_read('fff', static_lump))

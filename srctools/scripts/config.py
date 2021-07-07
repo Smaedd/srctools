@@ -237,22 +237,22 @@ OPTIONS = [
     """),
 
     Opt(
-        'propcombine_qc_folder', Property('', [Property('loc', '../content')]),
-        """Define where the QC files are for combinable static props.
+        'prop_ops_qc_folder', Property('', [Property('loc', '../content')]),
+        """Define where the QC files are for use in static prop operations.
         This path is searched recursively. This defaults to 
         the 'content/' folder, which is adjacent to the game root.
         This is how Valve sets up their file structure.
         """
     ),
     Opt(
-        'propcombine_crowbar', True,
+        'prop_ops_crowbar', True,
         """If enabled, Crowbar will be used to decompile models which don't have
         a QC in the provided QC folder.
         """
     ),
     Opt(
-        'propcombine_cache', "decomp_cache/",
-        """Cache location for models decompiled for combining."""
+        'prop_ops_cache', "decomp_cache/",
+        """Cache location for models decompiled for static prop operations."""
     ),
     Opt(
         'propcombine_auto_range', 0,

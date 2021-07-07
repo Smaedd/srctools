@@ -24,6 +24,7 @@ from srctools.bsp_transform import run_transformations
 from srctools.packlist import PackList
 from srctools.scripts import config
 from srctools.compiler import propcombine
+from srctools.compiler import propscale
 
 
 def main(argv: List[str]) -> None:
@@ -162,14 +163,14 @@ def main(argv: List[str]) -> None:
     LOGGER.info('Running transforms...')
     run_transformations(bsp_file.ents, fsys, packlist, bsp_file, game_info, studiomdl_loc)
 
-    if studiomdl_loc is not None and args.propcombine:
-        decomp_cache_path = conf.get(str, 'propcombine_cache')
+    if studiomdl_loc is not None:
+        decomp_cache_path = conf.get(str, 'prop_ops_cache')
         if decomp_cache_path is not None:
             decomp_cache_loc = (game_info.root / decomp_cache_path).resolve()
             decomp_cache_loc.mkdir(parents=True, exist_ok=True)
         else:
             decomp_cache_loc = None
-        if conf.get(bool, 'propcombine_crowbar'):
+        if conf.get(bool, 'prop_ops_crowbar'):
             # argv[0] is the location of our script/exe, which lets us locate
             # Crowbar from there. The environment var is for testing.
             if 'CROWBAR_LOC' in os.environ:
@@ -179,8 +180,7 @@ def main(argv: List[str]) -> None:
         else:
             crowbar_loc = None
 
-        LOGGER.info('Combining props...')
-        propcombine.combine(
+        propscale.scale_props(
             bsp_file,
             bsp_file.ents,
             packlist,
@@ -189,21 +189,43 @@ def main(argv: List[str]) -> None:
             qc_folders=[
                 game_info.root / folder
                 for folder in
-                conf.get(Property, 'propcombine_qc_folder').as_array(conv=Path)
+                conf.get(Property, 'prop_ops_qc_folder').as_array(conv=Path)
             ],
             decomp_cache_loc=decomp_cache_loc,
             crowbar_loc=crowbar_loc,
-            auto_range=conf.get(int, 'propcombine_auto_range'),
-            min_cluster=conf.get(int, 'propcombine_min_cluster'),
             debug_tint=args.showgroups,
             debug_dump=args.dumpgroups,
         )
-        LOGGER.info('Done!')
-    else:  # Strip these if they're present.
-        for ent in bsp_file.ents.by_class['comp_propcombine_set']:
-            ent.remove()
-        for ent in bsp_file.ents.by_class['comp_propcombine_volume']:
-            bsp_file.bmodels.pop(ent, None)  # Ignore if not present.
+
+        if args.propcombine:
+            LOGGER.info('Combining props...')
+            propcombine.combine(
+                bsp_file,
+                bsp_file.ents,
+                packlist,
+                game_info,
+                studiomdl_loc,
+                qc_folders=[
+                    game_info.root / folder
+                    for folder in
+                    conf.get(Property, 'prop_ops_qc_folder').as_array(conv=Path)
+                ],
+                decomp_cache_loc=decomp_cache_loc,
+                crowbar_loc=crowbar_loc,
+                auto_range=conf.get(int, 'propcombine_auto_range'),
+                min_cluster=conf.get(int, 'propcombine_min_cluster'),
+                debug_tint=args.showgroups,
+                debug_dump=args.dumpgroups,
+            )
+            LOGGER.info('Done!')
+        else:  # Strip these if they're present.
+            for ent in bsp_file.ents.by_class['comp_propcombine_set']:
+                ent.remove()
+            for ent in bsp_file.ents.by_class['comp_propcombine_volume']:
+                bsp_file.bmodels.pop(ent, None)  # Ignore if not present.
+                ent.remove()
+    else:
+        for ent in bsp_file.ents.by_class['prop_static_scalable']:
             ent.remove()
 
     if conf.get(bool, 'auto_pack') and args.allow_pack:

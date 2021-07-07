@@ -668,6 +668,8 @@ def group_props_ent(
             maxes += 0.05
             combine_set.volume += size.x * size.y * size.z
             combine_set.collision.append(make_collision_bbox(origin, angles, mins, maxes))
+
+            ent.remove()
         elif ent['classname'] == 'comp_propcombine_volume':
             # Brushwork collision. Pop from the dict, so the brush model is removed.
             try:
