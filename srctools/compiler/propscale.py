@@ -31,6 +31,7 @@ from srctools.logger import get_logger
 from srctools.packlist import PackList
 from srctools.bsp import BSP, StaticProp, StaticPropFlags, BModel, VisLeaf, VisTree
 from srctools.mdl import Model, MDL_EXTS
+from srctools.mdl import Flags as MDLFlags
 from srctools.smd import Mesh
 from srctools.compiler.mdl_compiler import ModelCompiler
 from srctools.compiler.propcombine import (
@@ -217,6 +218,11 @@ def compile_func(
             ])
         ))
 
+        if mdl.flags & MDLFlags.translucent_twopass:
+            f.write('$mostlyopaque\n')
+        elif mdl.flags & MDLFlags.force_opaque:
+            f.write('$opaque\n')
+
         for mat in sorted(cdmats):
             f.write('$cdmaterials "{}"\n'.format(mat))
 
@@ -304,6 +310,98 @@ def compute_static_prop_leaves(
     return set(prop_leaves)
 
 
+def create_prop_for_ent(
+    ent: Entity,
+    get_model_only: Callable[[str], Model],
+    scaling: float,
+    bsp: BSP,
+    bsp_ents: VMF,
+) -> Optional[StaticProp]:
+
+    modelname = ent['model']
+    origin = Vec.from_str(ent['origin'])
+    angles = Angle.from_str(ent['angles'])
+
+    prop_model = get_model_only(modelname)
+    if prop_model is None:
+        return None
+
+    solidity = int(float(ent['solid']))
+
+    skin = int(float(ent['skin']))
+
+    fademaxdist = float(ent['fademaxdist'])
+    fademindist = 0
+
+    visleafs = compute_static_prop_leaves(prop_model, origin, angles, bsp.nodes)
+
+    flags = StaticPropFlags(0)
+    lightmapresx = lightmapresy = 0
+
+    # It is important to get flags correct so prop combine works correctly
+    if int(float(ent['ignorenormals'])) == 1:
+        flags |= StaticPropFlags.IGNORE_NORMALS
+    if int(float(ent['disableshadows'])) == 1:
+        flags |= StaticPropFlags.NO_SHADOW
+    if int(float(ent['disablevertexlighting'])) == 1:
+        flags |= StaticPropFlags.NO_PER_VERTEX_LIGHTING
+    if int(float(ent['disableselfshadowing'])) == 1:
+        flags |= StaticPropFlags.NO_SELF_SHADOWING
+    if int(float(ent['screenspacefade'])) == 1:
+        flags |= StaticPropFlags.SCREEN_SPACE_FADE
+    if int(float(ent['generatelightmaps'])) == 0:
+        flags |= StaticPropFlags.NO_PER_TEXEL_LIGHTING
+    else:
+        lightmapresx = int(float(ent['lightmapresolutionx']))
+        lightmapresy = int(float(ent['lightmapresolutiony']))
+
+    if fademaxdist > 0:  # fades out
+        flags |= StaticPropFlags.DOES_FADE
+        fademindist = float(ent['fademindist'])
+        if fademindist < 0:
+            fademindist = fademaxdist
+
+    forcedfadescale: int
+    try:
+        forcedfadescale = int(float(ent['fadescale']))
+    except KeyError:
+        forcedfadescale = 1
+
+    lightingorigin = Vec(0, 0, 0)
+
+    try:
+        lightoriginname = ent['lightingorigin']
+        for infolighting in bsp_ents.by_class['info_lighting']:
+            if infolighting['targetname'] == lightoriginname:
+                lightingorigin = infolighting.get_origin()
+                flags |= StaticPropFlags.HAS_LIGHTING_ORIGIN
+                break
+    except KeyError:
+        pass
+
+    mindxlevel = int(float(ent['mindxlevel']))
+    maxdxlevel = int(float(ent['maxdxlevel']))
+
+    return StaticProp(
+        model=modelname,
+        origin=origin,
+        angles=angles,
+        scaling=scaling,
+        visleafs=visleafs,
+        solidity=solidity,
+        flags=flags,
+        skin=skin,
+        min_fade=fademindist,
+        max_fade=fademaxdist,
+        lighting=lightingorigin,
+        fade_scale=forcedfadescale,
+        lightmapresx=lightmapresx,
+        lightmapresy=lightmapresy,
+        min_dx_level=mindxlevel,
+        max_dx_level=maxdxlevel,
+    )
+
+
 def scale_props(
         bsp: BSP,
         bsp_ents: VMF,
@@ -369,36 +467,25 @@ def scale_props(
 
         return model
 
-    scaled_props: list[StaticProp] = []
+    # This stores all of the props in the map
+    final_props: list[StaticProp] = bsp.props
 
     if not studiomdl_loc.exists():
         LOGGER.warning('No studioMDL! Cannot scale props! Using a scale of 1.0 instead.')
 
         for ent in scalable_props:
-            modelname = ent['model']
-            origin = Vec.from_str(ent['origin'])
-            angles = Angle.from_str(ent['angles'])
-
-            prop_model = get_model_only(modelname)
-            if prop_model is None:
+            prop = create_prop_for_ent(ent,
+                                       get_model_only,
+                                       1.0,
+                                       bsp,
+                                       bsp_ents
+                                       )
+            if prop is None:
                 continue
 
-            visleafs = compute_static_prop_leaves(prop_model, origin, angles, bsp.nodes)
+            final_props.append(prop)
 
-            r, g, b = 1.0, 1.0, 1.0
-
-            scaled_props.append(StaticProp(
-                model=modelname,
-                origin=origin,
-                angles=angles,
-                scaling=1.0,
-                visleafs=visleafs,
-                solidity=int(float(ent['solid'])),
-                flags=StaticPropFlags(0x100),
-                lighting=origin,
-                tint=Vec(round(r * 255), round(g * 255), round(b * 255)),
-                renderfx=255,
-            ))
+        bsp.props = final_props
 
     map_name = Path(bsp.filename).stem
 
@@ -406,9 +493,6 @@ def scale_props(
     _mesh_cache.clear()
     _coll_cache.clear()
     missing_qcs: Set[str] = set()
-
-    # This stores all of the props in the map
-    final_props: list[StaticProp] = bsp.props
 
     def get_model(filename: str) -> Union[Tuple[QC, Model], Tuple[None, None]]:
         """Given a filename, load/parse the QC and MDL data.
@@ -458,28 +542,14 @@ def scale_props(
     ) as compiler:
         for scalable_prop in scalable_props:
 
-            modelname = scalable_prop['model']
-            origin = Vec.from_str(scalable_prop['origin'])
-            angles = Angle.from_str(scalable_prop['angles'])
-
-            prop_model = get_model_only(modelname)
-            if prop_model is None:
+            prop_to_scale = create_prop_for_ent(scalable_prop,
+                                                get_model_only,
+                                                float(scalable_prop['modelscale']),
+                                                bsp,
+                                                bsp_ents
+                                                )
+            if prop_to_scale is None:
                 continue
-
-            r, g, b = 1.0, 1.0, 1.0
-
-            prop_to_scale = StaticProp(
-                model=modelname,
-                origin=origin,
-                angles=angles,
-                scaling=float(scalable_prop['modelscale']),
-                visleafs=set(),
-                solidity=int(float(scalable_prop['solid'])),
-                flags=StaticPropFlags(0x100),
-                lighting=origin,
-                tint=Vec(round(r * 255), round(g * 255), round(b * 255)),
-                renderfx=255,
-            )
 
             scaled_prop = scale_prop(compiler, prop_to_scale, bsp.nodes, get_model)
             if debug_tint:

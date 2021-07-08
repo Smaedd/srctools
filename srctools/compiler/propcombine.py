@@ -931,6 +931,8 @@ def combine(
         prop_groups[get_grouping_key(prop)].append(prop)
         prop_count += 1
 
+    print(prop_groups)
+
     # These are models we cannot merge no matter what -
     # no source files etc.
     cannot_merge = prop_groups.pop(None, [])

@@ -351,7 +351,7 @@ class StaticPropFlags(Flag):
     NO_PER_VERTEX_LIGHTING = 0x40
     NO_SELF_SHADOWING = 0x80
 
-    #NO_PER_TEXEL_LIGHTING = 0x100  # Secondary 0x100 for 2013mp
+    NO_PER_TEXEL_LIGHTING = 0x100  # Secondary 0x100 for 2013mp
 
     # These are set in the secondary flags section.
     NO_FLASHLIGHT = 0x100  # Disable projected texture lighting.
