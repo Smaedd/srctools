@@ -212,8 +212,8 @@ def compile_func(
             ]) or '"notsolid"',
 
             bbox=' '.join([
-                str(bbox_min * prop_pos.scale),
-                str(bbox_max * prop_pos.scale),
+                str(bbox_min * prop_pos.scale * 1.25),  # Multiply by 1.25 to ensure no bbox issues (this is how
+                str(bbox_max * prop_pos.scale * 1.25),  # other programs do it, roughly)
             ])
         ))
 
